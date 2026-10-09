@@ -7,8 +7,8 @@ from explainer import AdaptiveXAIEngine
 
 app = FastAPI(
     title="Explainable AI Adaptive Education API",
-    description="Enterprise API delivering real-time student performance predictions, adaptive pathways, and 'What-If' scenarios.",
-    version="2.0.0"
+    description="Enterprise API delivering student risk predictions, XAI attributions, and one-click communication drafts.",
+    version="2.1.0"
 )
 
 app.add_middleware(
@@ -51,7 +51,7 @@ def read_root():
     return {
         "service": "XAI Adaptive Education Enterprise API",
         "status": "Healthy",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "docs_url": "/docs"
     }
 
@@ -69,6 +69,20 @@ def predict_and_explain(student: StudentMetricsInput):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+@app.post("/api/generate-communication")
+def generate_communication(student: StudentMetricsInput):
+    try:
+        data_dict = student.model_dump()
+        student_id = data_dict.pop("student_id", "STD-1001")
+        input_df = pd.DataFrame([data_dict])
+        drafts = engine.generate_communication_draft(student_id, input_df)
+        return {
+            "status": "success",
+            "data": drafts
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Communication error: {str(e)}")
 
 @app.post("/api/what-if-simulation")
 def simulate_what_if(req: WhatIfRequest):

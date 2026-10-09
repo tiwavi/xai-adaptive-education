@@ -5,8 +5,8 @@ import numpy as np
 class AdaptiveXAIEngine:
     """
     Advanced Explainable AI Engine for Personalized & Adaptive Education.
-    Computes local feature importances, generates learning pathways, 
-    and simulates 'What-If' scenarios.
+    Computes local feature importances, generates pathways, simulates 'What-If' scenarios,
+    and drafts personalized student/parent communications.
     """
     def __init__(self, model_path='model.pkl', explainer_path='explainer_model.pkl', 
                  preprocessor_path='preprocessor.pkl', features_path='transformed_feature_names.pkl'):
@@ -41,11 +41,7 @@ class AdaptiveXAIEngine:
             })
             
         row = processed_df.iloc[0]
-        
-        # Determine Adaptive Learning Pathway
         pathway = self._generate_adaptive_pathway(prob_pass, row)
-        
-        # Interventions
         interventions = self._generate_interventions(row, prediction)
 
         return {
@@ -57,8 +53,57 @@ class AdaptiveXAIEngine:
             "personalized_interventions": interventions
         }
 
+    def generate_communication_draft(self, student_id: str, student_df: pd.DataFrame) -> dict:
+        exp = self.explain_student(student_df)
+        prob = exp["pass_probability"]
+        pathway = exp["adaptive_pathway"]
+        interventions = exp["personalized_interventions"]
+        
+        actions_text = "\n".join([f"- {item['action']}" for item in interventions]) if interventions else "- Maintain current positive study habits and portal engagement."
+
+        student_email = f"""Subject: Academic Support & Study Plan Update ({student_id})
+
+Hi {student_id},
+
+I wanted to share a brief update regarding your course progress. Our learning analytics system has assigned you to the '{pathway['track']}' pathway to support your academic growth.
+
+Primary Learning Focus:
+{pathway['focus']}
+
+Recommended Action Items:
+{actions_text}
+
+Target Weekly VLE Study Time: {pathway['target_weekly_vle_hours']} hours/week.
+
+Please let me know if you would like to schedule a 1-on-1 check-in during office hours to review these strategies together.
+
+Best regards,
+Course Instructor"""
+
+        parent_email = f"""Subject: Academic Progress Advisory - Student {student_id}
+
+Dear Parent/Guardian,
+
+I am writing to share an academic progress advisory for student {student_id}.
+
+According to our course engagement indicators, your student is currently on the '{pathway['track']}' track with an estimated module completion probability of {prob}%.
+
+To help them achieve optimal learning outcomes, we recommend supporting them with the following study habits:
+{actions_text}
+
+Recommended study duration: {pathway['target_weekly_vle_hours']} hours per week on the course portal.
+
+Please feel free to reach out if you have any questions regarding their learning goals.
+
+Warm regards,
+Academic Support Team"""
+
+        return {
+            "student_email_draft": student_email,
+            "parent_email_draft": parent_email
+        }
+
     def simulate_what_if(self, student_df: pd.DataFrame, delta_vle_days: float = 0, delta_score: float = 0) -> dict:
-        """Simulate how changing behavior impacts passing probability."""
         modified_df = student_df.copy()
         modified_df['active_vle_days'] = modified_df['active_vle_days'] + delta_vle_days
         modified_df['avg_assessment_score'] = np.clip(modified_df['avg_assessment_score'] + delta_score, 0, 100)
