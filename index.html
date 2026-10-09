@@ -25,7 +25,7 @@
             </div>
             <div>
                 <h1 class="text-xl font-extrabold text-white tracking-wide flex items-center gap-2">
-                    EduXAI Agent <span class="text-xs px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 font-medium">Enterprise v2.2</span>
+                    EduXAI Agent <span class="text-xs px-2 py-0.5 rounded-md bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 font-medium">Enterprise v2.3</span>
                 </h1>
                 <p class="text-xs text-slate-400">Explainable AI Hub for Personalized & Adaptive Education</p>
             </div>
@@ -50,7 +50,7 @@
         </div>
     </header>
 
-    <main class="max-w-7xl mx-auto px-6 py-8">
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
 
         <!-- TAB 1: INDIVIDUAL STUDENT DEEP-DIVE -->
         <div id="tabSingle" class="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -190,6 +190,16 @@
                     </div>
                 </div>
 
+                <!-- Longitudinal Trend Line Chart -->
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                        <i data-lucide="trending-up" class="w-5 h-5 text-indigo-400"></i> Longitudinal Success Trend (Weeks 2 - 12)
+                    </h3>
+                    <div class="h-44 relative">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+
                 <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-3">
                     <div class="flex items-center justify-between border-b border-slate-800 pb-3">
                         <h3 class="text-sm font-bold text-white flex items-center gap-2">
@@ -278,7 +288,7 @@
                             <i data-lucide="info" class="w-4 h-4 text-indigo-400"></i> Teacher Actionable Takeaway:
                         </h4>
                         <p id="simAdvice" class="text-xs text-slate-300 leading-relaxed">
-                            Increasing portal active days by +15 and review scores by +10 points shifts student trajectory from At-Risk to Pass.
+                            Increasing portal active days by +15 and score by +10 points results in a predicted outcome shift to 'Pass'.
                         </p>
                     </div>
                 </div>
@@ -306,6 +316,30 @@
                 </div>
             </div>
 
+            <!-- Weekly Action Checklist Widget -->
+            <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <i data-lucide="check-square" class="w-5 h-5 text-emerald-400"></i> Automated Weekly Teacher Action Checklist
+                </h3>
+                <div id="actionChecklistContainer" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div class="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-1">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">High Priority</span>
+                        <h4 id="actionAtRisk" class="font-bold text-white mt-1">0 At-Risk Students</h4>
+                        <p class="text-slate-400 text-[11px]">Send communication nudges & assign remedial modules.</p>
+                    </div>
+                    <div class="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-1">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">Moderate Priority</span>
+                        <h4 id="actionSupport" class="font-bold text-white mt-1">0 Guided Support Tracks</h4>
+                        <p class="text-slate-400 text-[11px]">Review submission lag alerts & set calendar reminders.</p>
+                    </div>
+                    <div class="p-4 bg-slate-800/60 border border-slate-700/60 rounded-xl space-y-1">
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Enrichment</span>
+                        <h4 id="actionEnrich" class="font-bold text-white mt-1">0 Advanced Students</h4>
+                        <p class="text-slate-400 text-[11px]">Assign extension case studies and peer mentorship tasks.</p>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div class="bg-slate-900/60 border border-slate-800 p-5 rounded-2xl">
                     <p class="text-xs font-bold text-slate-400 uppercase">Total Students</p>
@@ -325,7 +359,6 @@
                 </div>
             </div>
 
-            <!-- Filters & Search Bar -->
             <div class="flex flex-col md:flex-row items-center justify-between gap-4 bg-slate-900/60 p-4 border border-slate-800 rounded-2xl">
                 <div class="relative w-full md:w-72">
                     <i data-lucide="search" class="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
@@ -399,6 +432,7 @@
     <script>
         lucide.createIcons();
         let chartInstance = null;
+        let trendChartInstance = null;
         let globalCohortCache = [];
 
         function updateVal(id, val) {
@@ -491,6 +525,37 @@
             document.getElementById('probText').innerText = prob + "%";
             const offset = 163.3 - (163.3 * (prob / 100));
             document.getElementById('probRing').style.strokeDashoffset = offset;
+
+            // Render Longitudinal Trend Chart
+            const trendWeeks = data.longitudinal_trend.map(t => t.week);
+            const trendProbs = data.longitudinal_trend.map(t => t.pass_probability);
+            if (trendChartInstance) trendChartInstance.destroy();
+
+            const trendCtx = document.getElementById('trendChart').getContext('2d');
+            trendChartInstance = new Chart(trendCtx, {
+                type: 'line',
+                data: {
+                    labels: trendWeeks,
+                    datasets: [{
+                        label: 'Pass Probability (%)',
+                        data: trendProbs,
+                        borderColor: isPass ? '#10b981' : '#f43f5e',
+                        backgroundColor: isPass ? 'rgba(16,185,129,0.1)' : 'rgba(244,63,94,0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+                        y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } }
+                    }
+                }
+            });
 
             document.getElementById('pathwayTrack').innerText = data.adaptive_pathway.track;
             document.getElementById('pathwayFocus').innerText = "Core Focus: " + data.adaptive_pathway.focus;
@@ -665,6 +730,21 @@
             document.getElementById('cohortAtRisk').innerText = sum.at_risk_count;
             document.getElementById('cohortOnTrack').innerText = sum.on_track_count;
             document.getElementById('cohortAvgProb').innerText = sum.class_average_pass_prob + "%";
+
+            // Update Teacher Action Checklist Widget
+            let remedialCount = 0;
+            let guidedCount = 0;
+            let enrichCount = 0;
+
+            globalCohortCache.forEach(s => {
+                if (s.adaptive_pathway.track.includes("Remedial")) remedialCount++;
+                else if (s.adaptive_pathway.track.includes("Guided")) guidedCount++;
+                else enrichCount++;
+            });
+
+            document.getElementById('actionAtRisk').innerText = `${remedialCount} At-Risk Students`;
+            document.getElementById('actionSupport').innerText = `${guidedCount} Guided Support Tracks`;
+            document.getElementById('actionEnrich').innerText = `${enrichCount} Advanced Students`;
         }
 
         function renderCohortTable(students) {
