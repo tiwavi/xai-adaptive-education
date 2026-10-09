@@ -5,11 +5,15 @@ import pandas as pd
 import io
 from typing import List, Optional
 from explainer import AdaptiveXAIEngine
+from database import init_db, register_user, authenticate_user, save_student_record, get_student_records
+
+# Initialize SQLite database on startup
+init_db()
 
 app = FastAPI(
     title="Explainable AI Adaptive Education API",
-    description="Enterprise API delivering student risk predictions, XAI attributions, one-click communication, and live CSV batch analysis.",
-    version="2.2.0"
+    description="Enterprise API with database persistence, user/admin authentication, XAI, and CSV analysis.",
+    version="3.0.0"
 )
 
 app.add_middleware(
@@ -22,7 +26,18 @@ app.add_middleware(
 
 engine = AdaptiveXAIEngine()
 
+class UserRegisterInput(BaseModel):
+    username: str
+    email: str
+    password: str
+    role: Optional[str] = "teacher"
+
+class UserLoginInput(BaseModel):
+    username: str
+    password: str
+
 class StudentMetricsInput(BaseModel):
+    user_id: Optional[int] = 1
     student_id: Optional[str] = Field("STD-1001", json_schema_extra={"example": "STD-1001"})
     gender: str = Field("M", json_schema_extra={"example": "M"})
     highest_education: str = Field("HE Qualification", json_schema_extra={"example": "HE Qualification"})
@@ -52,18 +67,38 @@ def read_root():
     return {
         "service": "XAI Adaptive Education Enterprise API",
         "status": "Healthy",
-        "version": "2.2.0",
+        "version": "3.0.0",
         "docs_url": "/docs"
     }
+
+@app.post("/api/auth/register")
+def api_register(user: UserRegisterInput):
+    res = register_user(user.username, user.email, user.password, user.role)
+    if not res["success"]:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return {"status": "success", "data": res}
+
+@app.post("/api/auth/login")
+def api_login(credentials: UserLoginInput):
+    res = authenticate_user(credentials.username, credentials.password)
+    if not res["success"]:
+        raise HTTPException(status_code=401, detail=res["error"])
+    return {"status": "success", "data": res["user"]}
 
 @app.post("/api/predict-and-explain")
 def predict_and_explain(student: StudentMetricsInput):
     try:
         data_dict = student.model_dump()
+        user_id = data_dict.pop("user_id", 1)
         student_id = data_dict.pop("student_id", "STD-1001")
+        
         input_df = pd.DataFrame([data_dict])
         explanation = engine.explain_student(input_df)
         explanation["student_id"] = student_id
+        
+        # Save record to database
+        save_student_record(user_id, student_id, data_dict, explanation["predicted_status"], explanation["pass_probability"])
+        
         return {
             "status": "success",
             "data": explanation
@@ -71,10 +106,19 @@ def predict_and_explain(student: StudentMetricsInput):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
+@app.get("/api/students/saved/{user_id}/{role}")
+def get_saved_students(user_id: int, role: str):
+    try:
+        records = get_student_records(user_id, role)
+        return {"status": "success", "records": records}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 @app.post("/api/generate-communication")
 def generate_communication(student: StudentMetricsInput):
     try:
         data_dict = student.model_dump()
+        data_dict.pop("user_id", None)
         student_id = data_dict.pop("student_id", "STD-1001")
         input_df = pd.DataFrame([data_dict])
         drafts = engine.generate_communication_draft(student_id, input_df)
@@ -89,6 +133,7 @@ def generate_communication(student: StudentMetricsInput):
 def simulate_what_if(req: WhatIfRequest):
     try:
         data_dict = req.student.model_dump()
+        data_dict.pop("user_id", None)
         data_dict.pop("student_id", None)
         input_df = pd.DataFrame([data_dict])
         simulation = engine.simulate_what_if(input_df, req.delta_vle_days, req.delta_score)
@@ -108,11 +153,14 @@ def batch_analyze(students: List[StudentMetricsInput]):
 
         for s in students:
             data_dict = s.model_dump()
+            user_id = data_dict.pop("user_id", 1)
             sid = data_dict.pop("student_id", "STD-UNKNOWN")
             input_df = pd.DataFrame([data_dict])
             exp = engine.explain_student(input_df)
             exp["student_id"] = sid
             results.append(exp)
+            
+            save_student_record(user_id, sid, data_dict, exp["predicted_status"], exp["pass_probability"])
             
             if "At-Risk" in exp["predicted_status"]:
                 at_risk_count += 1
@@ -151,6 +199,8 @@ async def upload_csv_batch(file: UploadFile = File(...)):
             exp = engine.explain_student(row_df)
             exp["student_id"] = student_id
             results.append(exp)
+
+            save_student_record(1, student_id, row_dict, exp["predicted_status"], exp["pass_probability"])
 
             if "At-Risk" in exp["predicted_status"]:
                 at_risk_count += 1
