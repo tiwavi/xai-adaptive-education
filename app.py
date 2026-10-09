@@ -1,14 +1,15 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import pandas as pd
+import io
 from typing import List, Optional
 from explainer import AdaptiveXAIEngine
 
 app = FastAPI(
     title="Explainable AI Adaptive Education API",
-    description="Enterprise API delivering student risk predictions, XAI attributions, and one-click communication drafts.",
-    version="2.1.0"
+    description="Enterprise API delivering student risk predictions, XAI attributions, one-click communication, and live CSV batch analysis.",
+    version="2.2.0"
 )
 
 app.add_middleware(
@@ -51,7 +52,7 @@ def read_root():
     return {
         "service": "XAI Adaptive Education Enterprise API",
         "status": "Healthy",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "docs_url": "/docs"
     }
 
@@ -131,6 +132,45 @@ def batch_analyze(students: List[StudentMetricsInput]):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Batch analysis error: {str(e)}")
+
+@app.post("/api/upload-csv")
+async def upload_csv_batch(file: UploadFile = File(...)):
+    try:
+        contents = await file.read()
+        df = pd.read_csv(io.BytesIO(contents))
+        
+        results = []
+        at_risk_count = 0
+        total_pass_prob = 0.0
+
+        for idx, row in df.iterrows():
+            row_dict = row.to_dict()
+            student_id = str(row_dict.pop("student_id", f"STD-{1000 + idx}"))
+            
+            row_df = pd.DataFrame([row_dict])
+            exp = engine.explain_student(row_df)
+            exp["student_id"] = student_id
+            results.append(exp)
+
+            if "At-Risk" in exp["predicted_status"]:
+                at_risk_count += 1
+            total_pass_prob += exp["pass_probability"]
+
+        cohort_summary = {
+            "total_students": len(df),
+            "at_risk_count": at_risk_count,
+            "on_track_count": len(df) - at_risk_count,
+            "class_average_pass_prob": round(total_pass_prob / max(len(df), 1), 2)
+        }
+
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "cohort_summary": cohort_summary,
+            "students": results
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"CSV processing error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
